@@ -1,0 +1,14 @@
+{#- indents are necessary for ec2 template rendering #}
+                  /var/log/haproxy.log
+                  {
+                      compress
+                      delaycompress
+                      notifempty
+                      daily
+                      rotate 31
+                      create 0600 root root
+                      sharedscripts
+                      postrotate
+                          /bin/kill -HUP `cat /var/run/syslogd.pid 2> /dev/null` 2> /dev/null || true
+                      endscript
+                  }

@@ -1,0 +1,128 @@
+{%- set s3bucket = "ars-pugnandi-haproxy-configuration-eu-central-1" %}
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Deploy simple nginx based reverse proxy'
+
+Resources:
+
+  InstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: "ap-rproxy-role"
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !ImportValue {{s3bucket}}-Policy-ReadOnly-ARN
+
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - !Ref InstanceRole
+
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: "Allow SSH and HTTP Access"
+      VpcId:
+        !ImportValue VPC
+      SecurityGroupIngress:
+        # SSH
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: '0.0.0.0/0'
+        # http/s
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+
+  Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      ImageId: ami-c7ee5ca8
+      KeyName: aws
+      IamInstanceProfile: !Ref InstanceProfile
+      InstanceType: t2.nano
+      AvailabilityZone:  eu-central-1a
+      EbsOptimized: false
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp2
+            DeleteOnTermination: true
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: false
+          DeviceIndex: "0"
+          SubnetId: !ImportValue 'SubnetPublic'
+          GroupSet:
+            - !Ref SecurityGroup
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #cloud-config
+            hostname: ap-rproxy
+            locale: en_US.utf8
+            manage_etc_hosts: false
+            package_update: true
+            package_upgrade: true
+            packages:
+              - curl
+              - unzip
+              - docker
+            runcmd:
+              - chkconfig docker
+              - /etc/init.d/docker start
+              - aws --region eu-central-1 s3 cp s3://{{s3bucket}}/haproxy.cfg /opt/haproxy.cfg
+              - chown ec2-user:ec2-user /opt/haproxy.cfg
+              - docker pull haproxy:1.7
+              - docker run -d --name haproxy -p 80:80 -v /opt/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro haproxy:1.7
+            write_files:
+              - path: /etc/logrotate.d/haproxy
+                owner: root:root
+                permissions: '0644'
+                content: |
+                  {% include "etc/logrotate.d/haproxy" %}  
+              - path: /etc/rsyslog.d/11-haproxy.conf
+                owner: root:root
+                permissions: '0644'
+                content: |
+                  {% include "etc/rsyslog.d/haproxy.conf" %}  
+              - path: /etc/rsyslog.d/10-udp.conf
+                owner: root:root
+                permissions: '0644'
+                content: |
+                  {% include "etc/rsyslog.d/udp.conf" %}  
+              - path: /usr/local/bin/update.sh
+                owner: root:root
+                permissions: '0755'
+                content: |
+                  {% include "usr/local/bin/update.sh" %}  
+
+  InstanceEIp:
+    Type: AWS::EC2::EIP
+    DependsOn: Instance
+    Properties:
+      InstanceId: !Ref Instance
+
+Outputs:
+  PublicEip:
+    Description: 'Elastic IP'
+    Value: !Ref InstanceEIp
+
