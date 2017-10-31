@@ -121,8 +121,22 @@ Resources:
     Properties:
       InstanceId: !Ref Instance
 
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: Z3CBRYU3UXXFKT
+      Comment: "cname entry for easier hostpoint config"
+      Name: "ap-redirect.hutter.cloud."
+      Type: "CNAME"
+      TTL: "300"
+      ResourceRecords:
+        - !GetAtt Instance.PublicDnsName
+
 Outputs:
   PublicEip:
     Description: 'Elastic IP'
     Value: !Ref InstanceEIp
+  Cname:
+    Description: cname for easier handling
+    Value: ap-redirect.hutter.cloud
 
